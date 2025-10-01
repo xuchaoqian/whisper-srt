@@ -1,0 +1,61 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[project]
+authors = [{name = "Xu Chaoqian", email = "chaoranxu@gmail.com"}]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Text Processing :: Linguistic",
+]
+dependencies = [
+  "faster-whisper",
+  "ffmpeg-python",
+  "tqdm",
+]
+description = "Fast and reliable SRT subtitle generator using Faster-Whisper (CTranslate2)"
+keywords = ["whisper", "faster-whisper", "srt", "subtitles", "transcription", "video", "audio", "speech-to-text"]
+license = {file = "LICENSE"}
+name = "whisper-srt"
+readme = "README.md"
+requires-python = ">=3.11"
+version = "1.0.0"
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "black",
+  "flake8",
+]
+
+[project.scripts]
+whisper-srt = "whisper_srt.cli:main"
+whisper-srt-batch = "whisper_srt.batch:main"
+
+[project.urls]
+homepage = "https://github.com/xuchaoqian/whisper-srt"
+issues = "https://github.com/xuchaoqian/whisper-srt/issues"
+repository = "https://github.com/xuchaoqian/whisper-srt"
+
+[tool.pytest.ini_options]
+addopts = ["-v", "--cov=whisper_srt"]
+log_cli = true
+log_cli_level = "INFO"
+
+[tool.black]
+line-length = 100
+target-version = ['py311', 'py312', 'py313']
+
+[tool.hatch.build.targets.wheel]
+packages = ["whisper_srt"]

@@ -1,0 +1,9 @@
+# Whisper SRT Dependencies
+#
+# Install the package in editable mode.
+# All dependencies are defined in pyproject.toml
+#
+# Installation:
+#   pip install -r requirements.txt
+
+-e .
