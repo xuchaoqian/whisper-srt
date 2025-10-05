@@ -389,6 +389,7 @@ with Processor(model_size="small", device="cpu", num_workers=1) as processor:
 ## 📚 Additional Documentation
 
 - **[VAD_TUNING_GUIDE.md](VAD_TUNING_GUIDE.md)** - Fix missing subtitles by tuning VAD parameters
+- **[MATCH_ALGORITHM.md](MATCH_ALGORITHM.md)** - Detailed explanation of the matching algorithm
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history and migration guide
 
 ## 🤝 Contributing
