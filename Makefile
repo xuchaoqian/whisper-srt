@@ -14,8 +14,8 @@ help:
 	@echo "  make install       - Install dependencies"
 	@echo ""
 	@echo "Running:"
-	@echo "  make run FILE=video.mp4    - Process video"
-	@echo "  make batch DIR=/videos     - Batch process"
+	@echo "  make run FILE=video.mp4  - Process single video"
+	@echo "  make batch DIR=/videos   - Batch process directory"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean         - Remove venv"
@@ -33,7 +33,7 @@ install:
 
 run:
 	@if [ -z "$(FILE)" ]; then echo "Usage: make run FILE=video.mp4"; exit 1; fi
-	$(python) -m whisper_srt.cli $(FILE) $(ARGS)
+	$(python) -m whisper_srt.processor $(FILE) $(ARGS)
 
 batch:
 	@if [ -z "$(DIR)" ]; then echo "Usage: make batch DIR=/videos"; exit 1; fi

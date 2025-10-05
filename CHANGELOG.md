@@ -31,17 +31,6 @@ Complete rewrite using Faster-Whisper (CTranslate2) for better performance and r
 - ffmpeg-python
 - tqdm
 
-#### Breaking Changes from v2.0.0 (PyTorch)
-
-This is a complete rewrite. If upgrading from the PyTorch-based version:
-
-- OpenAI Whisper (PyTorch) → Faster-Whisper (CTranslate2)
-- Removed configuration presets system
-- Removed subtitle optimization algorithms
-- Removed pysubs2 multi-format support
-- Simplified to focus on SRT generation only
-- Much faster and more reliable
-
 #### Migration
 
 Old commands still work with same syntax:

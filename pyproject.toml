@@ -40,8 +40,9 @@ dev = [
 ]
 
 [project.scripts]
-whisper-srt = "whisper_srt.cli:main"
+whisper-srt = "whisper_srt.processor:main"
 whisper-srt-batch = "whisper_srt.batch:main"
+whisper-srt-compare = "whisper_srt.compare:main"
 
 [project.urls]
 homepage = "https://github.com/xuchaoqian/whisper-srt"

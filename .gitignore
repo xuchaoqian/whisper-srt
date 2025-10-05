@@ -4,27 +4,26 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+*.pyc
 
-# Virtual environments
+# Virtual environment
 venv/
-ENV/
 env/
+ENV/
 .venv
+
+# Testing
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.srt.tmp
+*.wav.tmp
 
 # IDEs
 .vscode/
@@ -32,34 +31,18 @@ env/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
+.directory
 
-# Faster-Whisper model cache
-~/.cache/huggingface/
-
-# Generated files
-*.srt
-*.vtt
-*.ass
-*.wav
-*.mp3
-
-# Except example files
-!example.mp4
-!sample.mp4
-
-# Test files
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
+# Build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata
 
 # Logs
 *.log
-log/
-output/
-temp/
-
-# OS
-Thumbs.db
-.DS_Store
