@@ -46,3 +46,6 @@ pip-wheel-metadata
 
 # Logs
 *.log
+
+# Environment variables
+.env
