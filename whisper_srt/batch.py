@@ -195,7 +195,7 @@ Features:
     parser.add_argument(
         "--no-chunking",
         action="store_true",
-        help="Disable chunking for each video (default: disabled in batch mode)",
+        help="Disable chunking for each video",
     )
     parser.add_argument("--target-chunk-duration", type=float, default=300.0)
     parser.add_argument("--min-silence-duration", type=float, default=2.0)
