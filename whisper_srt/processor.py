@@ -320,6 +320,10 @@ def adjust_segment_timing(
             if end > next_start:
                 end = min(end, next_start - min_gap)
 
+        # Final safety net: ensure valid duration after all adjustments
+        if end <= start:
+            end = start + min_duration
+
         # Return in the same format as input
         if is_dict_format:
             adjusted.append({"text": text, "start": start, "end": end})
@@ -384,7 +388,7 @@ def transcribe_chunk_persistent(args) -> Tuple[float, Optional[List[dict]], str,
             language=language,
             vad_filter=vad_enabled,
             vad_parameters=vad_params if vad_enabled and vad_params else None,
-            word_timestamps=False,
+            word_timestamps=True,
         )
 
         # Get chunk duration for progress bar
@@ -419,9 +423,22 @@ def transcribe_chunk_persistent(args) -> Tuple[float, Optional[List[dict]], str,
         for seg in segments_with_progress:
             text = (seg.text or "").strip()
             if text:
-                chunk_segments.append(
-                    {"text": text, "start": start_time + seg.start, "end": start_time + seg.end}
-                )
+                segment_data = {
+                    "text": text,
+                    "start": start_time + seg.start,
+                    "end": start_time + seg.end,
+                }
+                # Include word-level timestamps if available
+                if seg.words:
+                    segment_data["words"] = [
+                        {
+                            "word": w.word.strip(),
+                            "start": start_time + w.start,
+                            "end": start_time + w.end,
+                        }
+                        for w in seg.words
+                    ]
+                chunk_segments.append(segment_data)
 
         logger.info(
             f"✅ Chunk {chunk_id} [PID-{_worker_id}]: Complete! ({len(chunk_segments)} segments)"
@@ -638,6 +655,9 @@ class Processor:
         min_duration: float = 0.7,
         max_duration: float = 7.0,
         chars_per_second: float = 20.0,
+        reference_text_path: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        alignment_batch_size: int = 40,
     ) -> str:
         """
         Process a single video using the existing worker pool.
@@ -658,6 +678,9 @@ class Processor:
             min_duration: Minimum subtitle duration
             max_duration: Maximum subtitle duration
             chars_per_second: Reading speed
+            reference_text_path: Path to reference script for LLM alignment
+            llm_model: LLM model for alignment (default: google/gemini-3-flash-preview)
+            alignment_batch_size: Batch size for LLM alignment
 
         Returns:
             Path to generated SRT file
@@ -698,6 +721,12 @@ class Processor:
             self.logger.info(f"   Min Duration: {min_duration}s")
             self.logger.info(f"   Max Duration: {max_duration}s")
             self.logger.info(f"   Chars/Second: {chars_per_second}")
+
+        # Reference text alignment
+        if reference_text_path:
+            self.logger.info(f"   Reference Text: {reference_text_path}")
+            self.logger.info(f"   LLM Model: {llm_model or 'google/gemini-3-flash-preview'}")
+            self.logger.info(f"   Alignment Batch Size: {alignment_batch_size}")
 
         temp_dir = tempfile.mkdtemp(prefix="whisper_")
 
@@ -781,6 +810,27 @@ class Processor:
             all_segments.sort(key=lambda x: x["start"])
 
             self.logger.info(f"✅ Total: {len(all_segments)}")
+
+            # Apply LLM alignment if reference text is provided
+            if reference_text_path:
+                self.logger.info("\n🤖 Applying LLM alignment with reference text...")
+                try:
+                    from .align import parse_reference_script, align_with_reference
+
+                    reference_entries = parse_reference_script(reference_text_path)
+                    all_segments = align_with_reference(
+                        all_segments,
+                        reference_entries,
+                        batch_size=alignment_batch_size,
+                        model=llm_model,
+                    )
+                    self.logger.info(f"✅ Aligned: {len(all_segments)} segments")
+                except ImportError as e:
+                    self.logger.error(f"Alignment module not available: {e}")
+                    self.logger.warning("Falling back to Whisper output without alignment")
+                except Exception as e:
+                    self.logger.error(f"LLM alignment failed: {e}")
+                    self.logger.warning("Falling back to Whisper output without alignment")
 
             if adjust_durations:
                 self.logger.info("🔧 Adjusting durations...")
@@ -918,6 +968,23 @@ Features:
     parser.add_argument(
         "--chars-per-second", type=float, default=20.0, help="Reading speed (default: 20 cps)"
     )
+
+    # Reference text alignment options
+    parser.add_argument(
+        "--reference-text",
+        help="Path to reference script file for LLM-based alignment (requires OPENROUTER_API_KEY)",
+    )
+    parser.add_argument(
+        "--llm-model",
+        help="LLM model for alignment (default: google/gemini-3-flash-preview)",
+    )
+    parser.add_argument(
+        "--alignment-batch-size",
+        type=int,
+        default=40,
+        help="Batch size for LLM alignment (default: 40)",
+    )
+
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
 
     args = parser.parse_args()
@@ -955,6 +1022,9 @@ Features:
                 min_duration=args.min_duration,
                 max_duration=args.max_duration,
                 chars_per_second=args.chars_per_second,
+                reference_text_path=args.reference_text,
+                llm_model=args.llm_model,
+                alignment_batch_size=args.alignment_batch_size,
             )
             print(f"\n✅ Success: {output}")
 
