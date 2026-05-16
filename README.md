@@ -96,6 +96,51 @@ whisper-srt video.mp4 \
   --chars-per-second 18
 ```
 
+### Reference Text Alignment (LLM-Powered)
+
+When you have a reference script (e.g., official subtitles or transcript), you can use LLM-based alignment for **perfect subtitle timing**:
+
+```bash
+# Setup: Copy env.example to .env and add your API key
+cp env.example .env
+# Edit .env and set OPENROUTER_API_KEY=sk-or-v1-your-key
+
+# Or set via environment variable
+export OPENROUTER_API_KEY="sk-or-v1-..."
+
+# Process with reference text
+whisper-srt video.mp4 \
+  --reference-text /path/to/script.txt \
+  -l en
+
+# Use a different LLM model
+whisper-srt video.mp4 \
+  --reference-text /path/to/script.txt \
+  --llm-model google/gemini-2.5-flash \
+  -l en
+```
+
+**Reference Text Format:**
+
+```
+1
+First dialogue line here.
+
+2
+Second dialogue line here.
+
+3
+Third dialogue line here.
+```
+
+**How it works:**
+
+1. Whisper extracts timestamps from the audio
+2. LLM matches the reference text to Whisper's timestamps
+3. Result: Correct text + Accurate timing = Perfect subtitles
+
+**Cost:** ~$0.02-0.05 per 22-minute episode using Gemini Flash
+
 ### Batch Processing
 
 ```bash
@@ -157,6 +202,43 @@ whisper-srt video.mp4 \
 - `--chars-per-second 20` - Comfortable reading speed
 - `--workers 4` - Parallel processing with 4 workers
 
+### With Reference Text (Best Quality)
+
+If you have a reference script (official transcript), use this simpler approach for **100% accurate text**:
+
+```bash
+whisper-srt video.mp4 \
+  -m small \
+  -l en \
+  --no-chunking \
+  --no-vad \
+  --min-duration 0.7 \
+  --max-duration 7.0 \
+  --workers 1 \
+  --reference-text /path/to/script.txt
+```
+
+**Results:**
+
+- 100% correct text (from reference script)
+- Accurate Whisper timestamps
+- No transcription errors
+- Best for TV shows with available scripts
+
+**What each parameter does:**
+
+- `--no-chunking` - Process entire video at once (more consistent)
+- `--no-vad` - Capture all audio (let LLM handle filtering)
+- `--workers 1` - Single worker (no parallelism needed)
+- `--reference-text` - Path to reference script for LLM alignment
+
+**When to use which approach:**
+
+| Approach       | Use When                        |
+| -------------- | ------------------------------- |
+| VAD Tuning     | No reference script available   |
+| Reference Text | Have official transcript/script |
+
 ## 🎯 Available Commands
 
 | Command               | Purpose                 | Best For                         |
@@ -164,6 +246,7 @@ whisper-srt video.mp4 \
 | `whisper-srt`         | Process single video    | All videos (parallel by default) |
 | `whisper-srt-batch`   | Batch process directory | Multiple files with model reuse  |
 | `whisper-srt-compare` | Quality validation      | Verify against transcript        |
+| `whisper-srt-align`   | Align SRT with script   | Fix text using reference script  |
 
 ### Quality Validation
 
@@ -217,6 +300,46 @@ whisper-srt-compare output.srt original.txt
 | `--min-duration`        | Minimum subtitle duration (s) | 0.7     |
 | `--max-duration`        | Maximum subtitle duration (s) | 7.0     |
 | `--chars-per-second`    | Reading speed (characters/s)  | 20.0    |
+
+### Reference Text Alignment Options
+
+| Option                   | Description                                | Default                       |
+| ------------------------ | ------------------------------------------ | ----------------------------- |
+| `--reference-text`       | Path to reference script for LLM alignment | None                          |
+| `--llm-model`            | LLM model for alignment                    | google/gemini-3-flash-preview |
+| `--alignment-batch-size` | Batch size for LLM alignment               | 40                            |
+
+**Environment Variables:**
+
+- `OPENROUTER_API_KEY` - Required for reference text alignment (get key at https://openrouter.ai)
+- `LLM_MODEL` - Override default LLM model
+
+### Alignment-Only CLI (`whisper-srt-align`)
+
+If you already have an SRT file and want to align it with a reference script without re-running Whisper transcription:
+
+```bash
+# Basic usage
+whisper-srt-align video.srt script.txt
+
+# Specify output file
+whisper-srt-align video.srt script.txt -o aligned.srt
+
+# Use a different LLM model
+whisper-srt-align video.srt script.txt --llm-model gpt-4o
+
+# Verbose output
+whisper-srt-align video.srt script.txt -v
+```
+
+| Option            | Description                     | Default                       |
+| ----------------- | ------------------------------- | ----------------------------- |
+| `input_srt`       | Path to input SRT file          | Required (positional)         |
+| `reference_text`  | Path to reference script        | Required (positional)         |
+| `--output`, `-o`  | Output SRT file path            | `{input}_aligned.srt`         |
+| `--llm-model`     | LLM model for alignment         | google/gemini-3-flash-preview |
+| `--batch-size`    | Reference entries per LLM batch | 40                            |
+| `-v`, `--verbose` | Enable verbose logging          | False                         |
 
 ### Batch-Specific Options
 
