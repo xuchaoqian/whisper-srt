@@ -111,3 +111,125 @@ def test_unmatched_entries_are_dropped_not_invented() -> None:
     cues = build_cues_from_alignment([bad, good], words, segments=[])
     assert len(cues) == 1
     assert cues[0].text == "Hi"
+
+
+def _aligned_time(rid: int, original: str, st: float, en: float, kind: str = KIND_SPEECH) -> AlignedEntry:
+    """Build an AlignedEntry that uses the FA time-based scheme."""
+    ref = RefEntry(id=rid, original_text=original, tokens=original.lower().split(), kind=kind)
+    return AlignedEntry(ref=ref, start_time=st, end_time=en, confidence=0.9)
+
+
+def test_expand_short_cues_grows_long_text_into_available_gap() -> None:
+    """A 700ms cue carrying 46 chars at 20 cps (= 65.7 cps, unreadable)
+    must be extended to ~text/cps when there's room before the next cue.
+    This is the partial-FA-match fix."""
+    words: List[Word] = []
+    long_line = "and this time I'm going to make sure I get it."
+    aligned = [
+        _aligned_time(1, "First", 36.0, 37.0),
+        _aligned_time(2, long_line, 38.0, 38.7),  # 700ms / 46 chars / 20cps
+        _aligned_time(3, "Next thing", 42.0, 43.0),
+    ]
+    cues = build_cues_from_alignment(
+        aligned, words, segments=[], min_duration=0.7, max_duration=7.0,
+        chars_per_second=20.0,
+    )
+    long_cue = cues[1]
+    duration = long_cue.end - long_cue.start
+    # text/cps = 46/20 = 2.3s. Should expand toward that, not stay at 0.7s.
+    assert duration > 1.5, f"expected expansion, got {duration:.2f}s"
+    # And never overlap the next cue.
+    assert long_cue.end <= cues[2].start
+
+
+def test_expand_short_cues_does_not_overlap_next_cue() -> None:
+    """Expansion is capped by next cue's start - MIN_GAP_BETWEEN_CUES."""
+    words: List[Word] = []
+    aligned = [
+        _aligned_time(1, "really long sentence with many words to expand", 10.0, 10.7),
+        _aligned_time(2, "next", 11.2, 11.9),  # only 500ms gap to expand into
+    ]
+    cues = build_cues_from_alignment(
+        aligned, words, segments=[], min_duration=0.7, max_duration=7.0,
+        chars_per_second=20.0,
+    )
+    assert cues[0].end < cues[1].start
+
+
+def test_expand_short_cues_leaves_short_text_alone() -> None:
+    """A 700ms cue carrying 'Hi.' (3 chars) is already plenty long; no
+    expansion needed."""
+    words: List[Word] = []
+    aligned = [
+        _aligned_time(1, "Hi.", 0.0, 0.7),
+        _aligned_time(2, "Bye.", 5.0, 5.7),
+    ]
+    cues = build_cues_from_alignment(
+        aligned, words, segments=[], min_duration=0.7, max_duration=7.0,
+        chars_per_second=20.0,
+    )
+    # 3 chars / 20 cps = 0.15s optimal; cue is already 0.7s. Stay put.
+    assert abs((cues[0].end - cues[0].start) - 0.7) < 0.01
+
+
+def test_song_interpolate_distributes_run_by_time() -> None:
+    """When surrounding speech anchors carry FA time-based ranges, an
+    intervening run of unmatched song entries gets distributed across
+    `[prev.end_time, next.start_time]`."""
+    words: List[Word] = []
+    speech_a = _aligned_time(1, "Speech A", 0.0, 1.0)
+    song_1 = AlignedEntry(
+        ref=RefEntry(id=2, original_text="* line 1 *", tokens=["line", "1"], kind=KIND_SONG),
+        unmatched=True,
+    )
+    song_2 = AlignedEntry(
+        ref=RefEntry(id=3, original_text="* line 2 *", tokens=["line", "2"], kind=KIND_SONG),
+        unmatched=True,
+    )
+    song_3 = AlignedEntry(
+        ref=RefEntry(id=4, original_text="* line 3 *", tokens=["line", "3"], kind=KIND_SONG),
+        unmatched=True,
+    )
+    speech_b = _aligned_time(5, "Speech B", 10.0, 11.0)
+
+    aligned = [speech_a, song_1, song_2, song_3, speech_b]
+    cues = build_cues_from_alignment(
+        aligned, words, segments=[],
+        song_policy=SONG_POLICY_INTERPOLATE,
+        min_duration=0.7, max_duration=7.0, chars_per_second=20.0,
+    )
+    # 1 speech_a + 3 interpolated songs + 1 speech_b
+    assert len(cues) == 5
+    # Songs should start after speech_a.end (1.0) and end before speech_b.start (10.0).
+    for c in cues[1:4]:
+        assert c.start >= 1.0 - 1e-6
+        assert c.end <= 10.0 + 1e-6
+    # And they should be in order without overlap.
+    for i in range(1, 4):
+        assert cues[i].start >= cues[i - 1].end
+
+
+def test_song_interpolate_falls_back_to_index_path() -> None:
+    """When anchors are index-based (no `--llm` mode), the existing
+    index-based interpolation must still work."""
+    words = [
+        _w("speech", 0.0, 1.0),
+        _w("a", 1.5, 2.0),
+        _w("b", 3.0, 3.5),
+        _w("c", 4.0, 4.5),
+        _w("d", 5.0, 5.5),
+        _w("speech", 7.0, 8.0),
+    ]
+    aligned = [
+        _aligned(1, "Speech A", 0, 0),
+        AlignedEntry(
+            ref=RefEntry(id=2, original_text="* a *", tokens=["a"], kind=KIND_SONG),
+            unmatched=True,
+        ),
+        _aligned(3, "Speech B", 5, 5),
+    ]
+    cues = build_cues_from_alignment(
+        aligned, words, segments=[], song_policy=SONG_POLICY_INTERPOLATE,
+        min_duration=0.1,
+    )
+    assert len(cues) == 3
