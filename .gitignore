@@ -49,3 +49,6 @@ pip-wheel-metadata
 
 # Environment variables
 .env
+
+# Local working dirs
+videos/
