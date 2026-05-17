@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 # Avoid the well-known macOS OpenMP duplicate-library crash with PyTorch+CTranslate2.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -83,6 +83,8 @@ class WhisperXEngine:
         self._align_model = None
         self._align_metadata = None
         self._align_lang: Optional[str] = None
+        self._cached_audio = None
+        self._cached_audio_path: Optional[str] = None
 
     def _ensure_asr_loaded(self) -> None:
         if self._asr_model is not None:
@@ -127,8 +129,7 @@ class WhisperXEngine:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        logger.info("Loading audio: %s", audio_path)
-        audio = whisperx.load_audio(audio_path)
+        audio = self._load_audio(audio_path)
         audio_duration = float(len(audio)) / 16000.0
 
         logger.info("Transcribing audio (batch_size=%d)...", self.batch_size)
@@ -194,9 +195,102 @@ class WhisperXEngine:
             audio_duration=audio_duration,
         )
 
+    def _load_audio(self, audio_path: str):
+        """Load audio at 16 kHz mono. Cached on the engine so subsequent
+        `forced_align` calls don't re-read the file."""
+        import whisperx
+
+        if self._cached_audio_path == audio_path and self._cached_audio is not None:
+            return self._cached_audio
+
+        logger.info("Loading audio: %s", audio_path)
+        audio = whisperx.load_audio(audio_path)
+        self._cached_audio = audio
+        self._cached_audio_path = audio_path
+        return audio
+
+    def forced_align(
+        self,
+        entries: Sequence[Tuple[float, float, str]],
+        audio_path: str,
+        language: str,
+    ) -> List[List[Word]]:
+        """Forced-align arbitrary text against the audio.
+
+        `entries` is a list of `(start, end, text)` triples. Each triple's
+        `text` is forced-aligned against the audio inside the `[start, end]`
+        window using the same wav2vec2 model the engine uses for ASR
+        alignment. Returns one list of `Word` per entry, in the same order.
+        Empty list for entries where wav2vec2 produced no usable timings.
+        """
+        if not entries:
+            return []
+
+        import whisperx
+
+        self._ensure_align_loaded(language)
+        audio = self._load_audio(audio_path)
+        audio_duration = float(len(audio)) / 16000.0
+
+        clamped_segments = []
+        for start, end, text in entries:
+            s = max(0.0, float(start))
+            e = min(audio_duration, float(end))
+            if e <= s:
+                e = min(audio_duration, s + 0.05)
+            clamped_segments.append({"start": s, "end": e, "text": (text or "").strip()})
+
+        logger.info(
+            "Forced-aligning %d ref entries against audio (%.1fs total) ...",
+            len(clamped_segments),
+            audio_duration,
+        )
+
+        aligned = whisperx.align(
+            clamped_segments,
+            self._align_model,
+            self._align_metadata,
+            audio,
+            self.device,
+            return_char_alignments=False,
+        )
+
+        out: List[List[Word]] = []
+        raw_segments = aligned.get("segments", []) or []
+        # whisperx.align returns one segment per input segment, in order.
+        for raw_seg in raw_segments:
+            seg_words: List[Word] = []
+            for raw_w in raw_seg.get("words", []) or []:
+                token = (raw_w.get("word") or raw_w.get("text") or "").strip()
+                if not token:
+                    continue
+                w_start = raw_w.get("start")
+                w_end = raw_w.get("end")
+                if w_start is None or w_end is None:
+                    continue
+                seg_words.append(
+                    Word(
+                        text=token,
+                        start=float(w_start),
+                        end=float(w_end),
+                        score=float(raw_w.get("score") or 0.0),
+                        segment_idx=-1,
+                    )
+                )
+            out.append(seg_words)
+
+        # Pad with empty lists if the aligner returned fewer segments than
+        # requested (it sometimes drops segments where alignment failed).
+        while len(out) < len(clamped_segments):
+            out.append([])
+
+        return out
+
     def close(self) -> None:
         """Release model references so Python can reclaim memory."""
         self._asr_model = None
         self._align_model = None
         self._align_metadata = None
         self._align_lang = None
+        self._cached_audio = None
+        self._cached_audio_path = None
