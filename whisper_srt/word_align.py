@@ -35,12 +35,26 @@ PUNCT_PATTERN = re.compile(r"[^a-z0-9]+")
 
 @dataclass
 class AlignedEntry:
-    """Alignment result for a single reference entry."""
+    """Alignment result for a single reference entry.
+
+    Timing comes from one of two sources:
+    - `start_idx` / `end_idx` point into the WhisperX flat word list
+      (legacy deterministic alignment and the within-segment greedy
+      refinement use this).
+    - `start_time` / `end_time` are absolute audio seconds, set by the
+      forced-alignment refinement which produces brand-new word timings
+      that do not exist in the WhisperX word list.
+
+    The cue builder prefers `start_time` / `end_time` when present and
+    falls back to the index-based path otherwise.
+    """
 
     ref: RefEntry
     matched_indices: List[int] = field(default_factory=list)
     start_idx: Optional[int] = None
     end_idx: Optional[int] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
     confidence: float = 0.0
     unmatched: bool = False
     low_confidence: bool = False
