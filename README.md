@@ -1,10 +1,21 @@
 # whisper-srt
 
-WhisperX-driven SRT subtitle generator with deterministic reference-script
-word alignment and an opt-in LLM index resolver for unmatched lines.
+WhisperX-driven SRT subtitle generator with two reference-script matchers:
 
-Every cue timestamp comes from real audio via WhisperX forced alignment.
-The LLM is **not** used to invent or guess timestamps under any circumstance.
+1. **Deterministic** (default): a greedy sequential word aligner that maps
+   reference tokens onto WhisperX words. Free, fast, but brittle on heavily
+   paraphrased dialogue.
+2. **LLM + forced alignment** (`--llm`): a single LLM call returns the
+   WhisperX **segment indices** for every reference line. Inside each
+   entry's segment range, the reference text itself is forced-aligned
+   against the audio with wav2vec2 (the same model WhisperX uses for ASR
+   alignment), giving phoneme-level word timings and a per-entry
+   confidence score. Low-confidence entries fall back to the greedy
+   matcher within the same segment range.
+
+Every cue timestamp comes from real audio via WhisperX or wav2vec2
+forced alignment. The LLM is **not** used to invent or guess timestamps
+under any circumstance.
 
 ## How it works
 
@@ -21,18 +32,23 @@ Flat word timeline + segment list (real audio timestamps)
 Reference preprocessor: parse, normalize, classify (speech/song/direction/garbled)
    │
    ▼
-Deterministic sequential word aligner (Needleman–Wunsch style, layered scoring)
+   ┌─────────────────────┐         ┌──────────────────────────────────────┐
+   │  Deterministic      │   OR    │  LLM index resolver (--llm)          │
+   │  word aligner       │         │  ref entries → segment indices       │
+   │  (default)          │         │  → wav2vec2 forced-align ref text    │
+   │                     │         │    against audio (high conf path)    │
+   │                     │         │  → greedy match inside segment range │
+   │                     │         │    (low-conf fallback)               │
+   └─────────────────────┘         └──────────────────────────────────────┘
    │
-   ▼ (optional)  Unmatched lines → LLM index resolver → segment indices only
-   │                                                  │
-   ▼                                                  ▼
-Cue builder (song policy + duration rules)  ←  re-aligned via real WhisperX words
+   ▼
+Cue builder (song policy + duration rules)
    │
    ▼
 Timing validator (hard fail / warnings)
    │
    ▼
-.srt  +  .srt.warnings.json
+.srt  +  .srt.alignment.json  +  .srt.warnings.json
 ```
 
 The reference script's `original_text` (including speaker labels, punctuation
@@ -49,7 +65,7 @@ brew install ffmpeg                 # required runtime dependency
 python3.12 -m venv venv             # 3.11 / 3.12 / 3.13 all fine
 venv/bin/pip install --upgrade pip
 venv/bin/pip install -e .           # core dependencies (whisperx, torch, numpy<2, ffmpeg-python, tqdm)
-venv/bin/pip install -e ".[llm]"    # optional: enables --llm-resolve-unmatched
+venv/bin/pip install -e ".[llm]"    # optional: enables --llm
 venv/bin/pip install -e ".[dev]"    # optional: pytest etc.
 ```
 
@@ -84,21 +100,58 @@ Output is `path/to/video.srt`. If any reference lines remain unmatched or
 have low alignment confidence, a sidecar `path/to/video.srt.warnings.json`
 is written so you can fix the script and re-run.
 
-### Optional LLM fallback (indices only, never timestamps)
+### LLM-driven matching (`--llm`, indices only, never timestamps)
+
+For TV scripts and other paraphrased dialogue the deterministic aligner
+often fails. Pass `--llm` to let an LLM map every reference entry to
+WhisperX segment indices in a single call:
 
 ```bash
 export OPENROUTER_API_KEY=sk-...
 venv/bin/whisper-srt path/to/video.mp4 \
   --reference-text path/to/script.txt \
-  --llm-resolve-unmatched \
-  --llm-model google/gemini-2.5-flash
+  --llm \
+  --llm-model anthropic/claude-sonnet-4.6
 ```
+
+What you give up vs the deterministic path: a single ~10–30s LLM round-
+trip per file, plus the OpenRouter cost.
 
 Hard contract enforced in code: any LLM response containing `start`,
 `end`, an `HH:MM:SS` string, or a seconds-like decimal value is rejected.
-The LLM is allowed to return only WhisperX segment indices for the
-unmatched reference lines. The cue builder then derives the actual cue
-range from the real WhisperX words inside those segments.
+The LLM may return only WhisperX segment indices, never timestamps.
+
+Refinement inside the LLM-mapped segment range happens in stages:
+
+1. **wav2vec2 forced alignment of the reference text itself.** The same
+   wav2vec2 model that WhisperX uses for ASR word alignment is run a
+   second time, this time against the *script* text rather than the
+   transcript. This produces phoneme-level word timings and a mean
+   confidence score per entry. When the audio actually contains the
+   line, the score is high (typically 0.7–0.95) and the timing is
+   precise to ~50ms.
+2. **Monotonicity guard.** Forced-aligned entries whose `start_time`
+   drifts more than 1.5s before the running max `end_time` of already-
+   accepted entries are rejected. wav2vec2 occasionally latches onto
+   wrong phonemes far from the actual line; this catches those without
+   needing manual review.
+3. **Greedy fallback** for FA results that were rejected (low score,
+   monotonicity violation, or no words returned). The greedy matcher
+   anchors the cue to a real WhisperX word inside the LLM-mapped
+   segment range. Flagged `low_confidence: true` in `.alignment.json`.
+4. **Tail-FA for VAD truncation.** WhisperX's VAD sometimes ends the
+   transcript before the audio (post-credits dialogue). Any still-
+   unmatched ref entry from the last 5% of the script is forced-
+   aligned against the audio tail past WhisperX's last segment, so
+   post-credits lines still get cued.
+
+Each row in `.alignment.json` records `timing_source` (`forced-align`
+or `wx-word-index`) and `confidence` so you can audit which cues to
+trust.
+
+Transcripts are cached in `<video>.srt.transcript.json` so re-running
+with different `--llm-model` settings or after editing the reference
+script costs only the LLM call, not another WhisperX pass.
 
 ### Batch mode
 
@@ -161,13 +214,14 @@ Conventions used by the preprocessor:
 | `--compute-type` | `int8` | `int8`, `float16`, `float32` |
 | `--batch-size` | `8` | WhisperX ASR batch size |
 | `--reference-text` | – | Reference script path |
-| `--song-policy` | `align` | `align`, `skip`, `interpolate` |
+| `--song-policy` | `interpolate` | `align`, `skip`, `interpolate`. With `--llm`, song lines skip wav2vec2 alignment (lyrics aren't speech) and are distributed across the song's audio span between speech anchors. |
 | `--min-duration` | `0.7` | Minimum cue duration (seconds) |
 | `--max-duration` | `7.0` | Maximum cue duration (seconds) |
 | `--chars-per-second` | `20.0` | Reading speed for duration heuristic |
 | `--max-unmatched-pct` | `5.0` | Validator: fail if more than N% unmatched |
-| `--llm-resolve-unmatched` | off | Opt-in LLM index resolver for unmatched lines |
-| `--llm-model` | – | LLM model override (only with the resolver) |
+| `--llm` | off | Use LLM as the primary matcher (segment indices only) |
+| `--llm-model` | – | LLM model override (only used with `--llm`) |
+| `--no-transcript-cache` | – | Disable WhisperX transcript caching |
 | `-v, --verbose` | – | Verbose logging |
 
 `whisper-srt-batch` accepts the same flags plus `directory`,
