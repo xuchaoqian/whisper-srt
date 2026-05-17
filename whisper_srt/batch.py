@@ -11,7 +11,6 @@ step we avoid.
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import sys
 from pathlib import Path
@@ -56,12 +55,12 @@ def process_videos_batch(
     recursive: bool = False,
     skip_existing: bool = True,
     reference_text: Optional[str] = None,
-    song_policy: str = SONG_POLICY_ALIGN,
+    song_policy: str = SONG_POLICY_INTERPOLATE,
     min_duration: float = DEFAULT_MIN_DURATION,
     max_duration: float = DEFAULT_MAX_DURATION,
     chars_per_second: float = DEFAULT_CHARS_PER_SECOND,
     max_unmatched_pct: float = 5.0,
-    llm_resolve_unmatched: bool = False,
+    use_llm_matching: bool = False,
     llm_model: Optional[str] = None,
 ) -> dict:
     """Run the WhisperX-only pipeline over every video in a directory."""
@@ -109,7 +108,7 @@ def process_videos_batch(
                     max_duration=max_duration,
                     chars_per_second=chars_per_second,
                     max_unmatched_pct=max_unmatched_pct,
-                    llm_resolve_unmatched=llm_resolve_unmatched,
+                    use_llm_matching=use_llm_matching,
                     llm_model=llm_model,
                 )
                 processed += 1
@@ -141,7 +140,7 @@ def main() -> None:
     parser.add_argument(
         "--song-policy",
         choices=[SONG_POLICY_ALIGN, SONG_POLICY_SKIP, SONG_POLICY_INTERPOLATE],
-        default=SONG_POLICY_ALIGN,
+        default=SONG_POLICY_INTERPOLATE,
     )
 
     parser.add_argument("--min-duration", type=float, default=DEFAULT_MIN_DURATION)
@@ -149,15 +148,19 @@ def main() -> None:
     parser.add_argument("--chars-per-second", type=float, default=DEFAULT_CHARS_PER_SECOND)
     parser.add_argument("--max-unmatched-pct", type=float, default=5.0)
 
-    parser.add_argument("--llm-resolve-unmatched", action="store_true")
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use the LLM as the primary matcher for reference lines. "
+             "Indices only; timestamps still come from real WhisperX words.",
+    )
     parser.add_argument("--llm-model")
 
     parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    setup_logger(verbose=args.verbose)
 
     if not os.path.isdir(args.directory):
         print(f"Error: Directory not found: {args.directory}")
@@ -178,7 +181,7 @@ def main() -> None:
         max_duration=args.max_duration,
         chars_per_second=args.chars_per_second,
         max_unmatched_pct=args.max_unmatched_pct,
-        llm_resolve_unmatched=args.llm_resolve_unmatched,
+        use_llm_matching=args.llm,
         llm_model=args.llm_model,
     )
 
