@@ -19,9 +19,15 @@ classifiers = [
   "Topic :: Text Processing :: Linguistic",
 ]
 dependencies = [
-  "whisperx>=3.1.0",
-  "torch>=2.0.0",
-  "torchaudio>=2.0.0",
+  # WhisperX 3.3.x ships with pyannote.audio 3.3.x, which still calls
+  # `torchaudio.AudioMetaData`. That symbol was removed in torchaudio 2.4,
+  # so torch / torchaudio are pinned below 2.4 here.
+  # transformers 5.x in turn requires torch >= 2.4, so it is also pinned
+  # below 5.0. Bump all three pins together when upgrading WhisperX.
+  "whisperx>=3.1.0,<3.4",
+  "torch>=2.0.0,<2.4",
+  "torchaudio>=2.0.0,<2.4",
+  "transformers>=4.39,<5.0",
   "numpy<2",
   "ffmpeg-python",
   "tqdm",
@@ -36,7 +42,7 @@ version = "2.0.0"
 
 [project.optional-dependencies]
 llm = [
-  "httpx>=0.25.0",
+  "httpx[socks]>=0.25.0",  # socks extra so HTTPS_PROXY/ALL_PROXY=socks5://... works
   "python-dotenv>=1.0.0",
 ]
 all = [
