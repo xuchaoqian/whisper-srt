@@ -20,15 +20,12 @@ def setup_logger() -> logging.Logger:
 
 
 def validate_video_file(video_path: str) -> bool:
-    """
-    Validate video file format.
-
-    Args:
-        video_path: Path to video file
-
-    Returns:
-        True if valid video format, False otherwise
-    """
-    valid_extensions = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"}
+    """Return True if the path is a supported video or audio file."""
+    valid_extensions = {
+        # Video.
+        ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm",
+        # Audio (WhisperX accepts these directly via ffmpeg).
+        ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac",
+    }
     file_ext = Path(video_path).suffix.lower()
     return file_ext in valid_extensions
